@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Fuera de la Media — juego de fiesta para calificar situaciones.
+"""Rankealo — juego de fiesta para calificar situaciones.
 
 Dos formatos:
   - 📱 Pasa el celu: un teléfono rota entre los jugadores y cada uno vota en secreto.
@@ -20,7 +20,7 @@ import streamlit as st
 
 from situaciones import CATEGORIAS, total_situaciones
 
-st.set_page_config(page_title="Fuera de la Media", page_icon="🐑", layout="centered")
+st.set_page_config(page_title="Rankealo", page_icon="🐑", layout="centered")
 
 MODOS_PUNTAJE = {
     "🐑 Oveja Negra": "El que queda más lejos de la mediana del grupo suma un punto de castigo.",
@@ -41,7 +41,7 @@ COMENTARIOS = [
 COMENTARIO_EMPATE = "Consenso absoluto (o empate perfecto): esta ronda nadie pierde. Qué aburridos."
 
 PENITENCIAS = [
-    "Publicar una historia diciendo 'perdí en Fuera de la Media por tener opiniones únicas'.",
+    "Publicar una historia diciendo 'perdí en Rankealo por tener opiniones únicas'.",
     "Mandar 'hola, ¿cómo estás?' al último match o contacto que dejaste en visto.",
     "Imitar a alguien de la mesa hasta que adivinen quién es.",
     "Hablar con acento español (de España) durante las próximas 2 rondas.",
@@ -55,9 +55,14 @@ PENITENCIAS = [
     "Bailar 15 segundos sin música mientras todos miran en silencio.",
 ]
 
-# Gemini 3.1 Flash-Lite primero (rápido y barato); los demás son respaldos por si
-# la key aún no tiene habilitada la familia 3.x en su tier.
-MODELOS_GEMINI = ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash"]
+# Modelos que se pueden elegir en Ajustes. El elegido se prueba primero y el resto
+# quedan como respaldo por si la key no tiene ese modelo habilitado en su tier.
+MODELOS_DISPONIBLES = [
+    "gemini-3.1-flash-lite",   # rápido y barato (recomendado)
+    "gemini-3-flash-preview",  # más capaz
+    "gemini-3.1-pro-preview",  # el más potente
+    "gemini-2.5-flash",        # respaldo de generación anterior
+]
 
 TONOS = {
     "Suave": "apto para jugar con la familia, humor blanco",
@@ -68,13 +73,41 @@ TONOS = {
 
 # ---------------------------------------------------------------- utilidades
 
-def get_api_key():
-    key = ""
+def _secret_key():
     try:
-        key = st.secrets.get("GEMINI_API_KEY", "")
+        return st.secrets.get("GEMINI_API_KEY", "")
     except Exception:
-        pass
-    return key or st.session_state.get("api_key", "")
+        return ""
+
+
+def get_api_key():
+    """La key escrita en Ajustes tiene prioridad; si no, se usa la de los Secrets."""
+    manual = st.session_state.get("api_key_input", "").strip()
+    return manual or _secret_key()
+
+
+def get_modelo():
+    """Modelo elegido en Ajustes (o uno escrito a mano), con el flash-lite por defecto."""
+    custom = st.session_state.get("modelo_custom", "").strip()
+    return custom or st.session_state.get("modelo_ia") or MODELOS_DISPONIBLES[0]
+
+
+def panel_ia():
+    """Controles para elegir la API key de Gemini y el modelo. Se usa en el setup y
+    en la barra lateral; setup y juego nunca se dibujan a la vez, así que las keys
+    de los widgets no chocan."""
+    if _secret_key():
+        st.caption("🤖 Hay una API key en los Secrets. Puedes sobrescribirla acá abajo.")
+    st.text_input(
+        "API key de Gemini", type="password", key="api_key_input",
+        help="Gratis en aistudio.google.com/apikey. Sin key, el juego usa solo el mazo.",
+    )
+    st.selectbox("Modelo de IA", MODELOS_DISPONIBLES, key="modelo_ia")
+    st.text_input(
+        "…o escribe otro modelo", key="modelo_custom",
+        placeholder="ej: gemini-3.5-flash",
+        help="Si Google lanza un modelo nuevo, escríbelo aquí y tiene prioridad.",
+    )
 
 
 def _extraer_texto(data):
@@ -100,8 +133,10 @@ def gemini(prompt):
         st.session_state["_gemini_error"] = "No hay API key configurada."
         return None
 
+    elegido = get_modelo()
+    orden = [elegido] + [m for m in MODELOS_DISPONIBLES if m != elegido]
     ultimo_error = "La IA no respondió."
-    for modelo in MODELOS_GEMINI:
+    for modelo in orden:
         gen_cfg = {"temperature": 1.0, "maxOutputTokens": 2048}
         if modelo.startswith("gemini-3"):
             # thinkingLevel solo existe en la familia 3.x; 2.5 usa otra API de thinking.
@@ -310,6 +345,10 @@ def sidebar_juego():
         st.caption(f"Modo: {st.session_state.cfg['modo_puntaje']} · "
                    f"{st.session_state.cfg['modo_juego']}")
         st.divider()
+        with st.expander("⚙️ Ajustes de IA"):
+            panel_ia()
+            estado = "conectada ✅" if get_api_key() else "sin key (solo mazo)"
+            st.caption(f"IA: {estado} · modelo: {get_modelo()}")
         if st.button("🔄 Nueva partida", use_container_width=True):
             st.session_state.fase = "setup"
             st.rerun()
@@ -318,7 +357,7 @@ def sidebar_juego():
 # ------------------------------------------------------------------ pantallas
 
 def pantalla_setup():
-    st.title("🐑 Fuera de la Media")
+    st.title("🐑 Rankealo")
     st.caption(f"El juego de calificar situaciones y no salirse del rebaño · "
                f"{total_situaciones()} situaciones en el mazo + IA")
 
@@ -349,14 +388,8 @@ def pantalla_setup():
         limite = c2.selectbox("Puntos de castigo para perder", [3, 5, 7], index=1)
         tono = st.select_slider("Tono de la IA", options=list(TONOS.keys()), value="Medio")
 
-        if not get_api_key():
-            api_key = st.text_input(
-                "API key de Gemini (opcional, activa las situaciones y comentarios con IA)",
-                type="password",
-            )
-        else:
-            api_key = ""
-            st.caption("🤖 IA conectada ✅")
+        with st.expander("⚙️ Ajustes de IA (opcional)", expanded=not get_api_key()):
+            panel_ia()
 
         if st.form_submit_button("🎮 ¡Jugar!", use_container_width=True, type="primary"):
             jugadores = [n.strip() for n in nombres.splitlines() if n.strip()]
@@ -367,8 +400,6 @@ def pantalla_setup():
             elif not categorias:
                 st.error("Elige al menos una categoría.")
             else:
-                if api_key:
-                    st.session_state.api_key = api_key.strip()
                 st.session_state.cfg = {
                     "modo_juego": modo_juego, "modo_puntaje": modo_puntaje,
                     "categorias": categorias, "escala": escala,
@@ -425,7 +456,7 @@ def pantalla_ronda():
                 err = st.session_state.get("_gemini_error") or "sin detalle"
                 st.warning(f"La IA no respondió ({err}). Sigo con el mazo normal.")
     else:
-        c2.caption("🤖 Configura tu API key de Gemini para generar situaciones nuevas.")
+        c2.caption("🤖 Agrega tu API key en ⚙️ Ajustes de IA (barra lateral) para generar con IA.")
 
 
 def pantalla_handoff():

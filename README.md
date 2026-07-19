@@ -1,4 +1,4 @@
-# 🐑 Fuera de la Media
+# 🐑 Rankealo
 
 Juego de fiesta: el grupo califica situaciones del 1 al 5 (o al 10) y pierde quien
 se sale del rebaño. Incluye ~500 situaciones en 5 categorías y generación de
@@ -37,12 +37,17 @@ Con una API key de [Google AI Studio](https://aistudio.google.com/apikey) el jue
 puede generar situaciones nuevas por categoría y comentarios sarcásticos tras cada
 ronda. Sin key, funciona igual con el banco de ~500 situaciones.
 
+Desde **⚙️ Ajustes de IA** (en la pantalla de inicio y en la barra lateral durante
+el juego) puedes pegar/cambiar la API key y elegir el modelo de Gemini
+(`gemini-3.1-flash-lite` por defecto, o escribir uno nuevo a mano). La key escrita
+ahí tiene prioridad sobre la de los Secrets.
+
 - **Local**: crea `.streamlit/secrets.toml` con
   ```toml
   GEMINI_API_KEY = "tu-api-key"
   ```
   (este archivo está en `.gitignore`, nunca lo subas al repo), o simplemente pega
-  la key en el campo opcional de la pantalla de inicio.
+  la key en **⚙️ Ajustes de IA**.
 
 ## Deploy gratis en Streamlit Community Cloud
 
