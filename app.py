@@ -55,7 +55,9 @@ PENITENCIAS = [
     "Bailar 15 segundos sin música mientras todos miran en silencio.",
 ]
 
-MODELOS_GEMINI = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+# Gemini 3.1 Flash-Lite primero (rápido y barato); los demás son respaldos por si
+# la key aún no tiene habilitada la familia 3.x en su tier.
+MODELOS_GEMINI = ["gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash"]
 
 TONOS = {
     "Suave": "apto para jugar con la familia, humor blanco",
@@ -75,25 +77,54 @@ def get_api_key():
     return key or st.session_state.get("api_key", "")
 
 
+def _extraer_texto(data):
+    """Concatena el texto de las 'parts', ignorando las de razonamiento (thought)."""
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+    except (KeyError, IndexError, TypeError):
+        return ""
+    trozos = [p["text"] for p in parts if p.get("text") and not p.get("thought")]
+    return "\n".join(trozos).strip()
+
+
 def gemini(prompt):
-    """Llama a la API de Gemini probando modelos en orden. Devuelve texto o None."""
+    """Llama a la API de Gemini probando modelos en orden. Devuelve texto o None.
+
+    Los modelos Gemini 3 razonan por defecto, así que fijamos thinkingLevel bajo y
+    un maxOutputTokens amplio para que el razonamiento no consuma toda la respuesta.
+    Guarda el último error en session_state para poder mostrarlo en la interfaz.
+    """
+    st.session_state["_gemini_error"] = None
     key = get_api_key()
     if not key:
+        st.session_state["_gemini_error"] = "No hay API key configurada."
         return None
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 1.1, "maxOutputTokens": 500},
-    }
+
+    ultimo_error = "La IA no respondió."
     for modelo in MODELOS_GEMINI:
+        gen_cfg = {"temperature": 1.0, "maxOutputTokens": 2048}
+        if modelo.startswith("gemini-3"):
+            # thinkingLevel solo existe en la familia 3.x; 2.5 usa otra API de thinking.
+            gen_cfg["thinkingConfig"] = {"thinkingLevel": "low"}
+        body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": gen_cfg}
         try:
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent",
-                params={"key": key}, json=body, timeout=30,
+                headers={"x-goog-api-key": key}, json=body, timeout=45,
             )
-            if r.status_code == 200:
-                return r.json()["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception:
+        except Exception as e:
+            ultimo_error = f"Error de conexión: {e}"
             continue
+        if r.status_code == 200:
+            texto = _extraer_texto(r.json())
+            if texto:
+                return texto
+            ultimo_error = f"{modelo}: respuesta vacía (revisa cuota o tokens)."
+            continue
+        detalle = r.text[:200].replace("\n", " ")
+        ultimo_error = f"{modelo} → HTTP {r.status_code}: {detalle}"
+
+    st.session_state["_gemini_error"] = ultimo_error
     return None
 
 
@@ -391,7 +422,8 @@ def pantalla_ronda():
                 sacar_situacion()
                 st.rerun()
             else:
-                st.warning("La IA no respondió, sigue con el mazo normal.")
+                err = st.session_state.get("_gemini_error") or "sin detalle"
+                st.warning(f"La IA no respondió ({err}). Sigo con el mazo normal.")
     else:
         c2.caption("🤖 Configura tu API key de Gemini para generar situaciones nuevas.")
 
@@ -511,6 +543,8 @@ def pantalla_resultados():
         if c:
             st.session_state.resultado["comentario"] = c.strip()
             st.rerun()
+        else:
+            st.caption(f"⚠️ {st.session_state.get('_gemini_error') or 'La IA no respondió.'}")
 
     if r["eliminados"]:
         st.divider()
